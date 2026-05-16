@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="screen_background">#F2F5F7</color>
+    <color name="surface_card">#FFFFFF</color>
+    <color name="text_primary">#17212B</color>
+    <color name="text_secondary">#5B6672</color>
+    <color name="action_primary">#0F6B5B</color>
+    <color name="action_secondary">#D7E3DF</color>
+    <color name="status_background">#E9F0F3</color>
+</resources>

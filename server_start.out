@@ -1,0 +1,4 @@
+Database connected successfully
+Database schema ready
+Secure Screen Manager API listening on port 4000
+[request] GET /health 200 1337ms ip=::1

@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+
+# Logs
+logs
+*.log
+
+# Environment
+.env
+
+# Gradle
+.gradle/
+.gradle-user/
+**/.gradle/
+**/build/
+
+# Android
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IntelliJ / VSCode
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
