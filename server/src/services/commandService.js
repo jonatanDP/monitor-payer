@@ -1,7 +1,20 @@
 const commandModel = require("../models/commandModel");
 const { createHttpError } = require("../utils/httpError");
 
-const ALLOWED_ACTIONS = ["SCREEN_OFF", "RESTART_APP", "PING"];
+const ALLOWED_ACTIONS = [
+  "SCREEN_OFF",
+  "SCREEN_ON",
+  "RESTART_APP",
+  "REBOOT_DEVICE",
+  "REFRESH_KIOSK",
+  "LOCK_SCREEN",
+  "UNLOCK_SCREEN",
+  "PING",
+  "UPDATE_CONFIG",
+  "SYNC",
+  "CLEAR_CACHE",
+  "MAINTENANCE_MODE"
+];
 
 async function queueCommand(deviceId, action, payload) {
   if (!ALLOWED_ACTIONS.includes(action)) {

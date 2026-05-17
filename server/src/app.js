@@ -6,7 +6,9 @@ const deviceRoutes = require("./routes/deviceRoutes");
 const commandRoutes = require("./routes/commandRoutes");
 const heartbeatRoutes = require("./routes/heartbeatRoutes");
 const logRoutes = require("./routes/logRoutes");
+const monitoringRoutes = require("./routes/monitoringRoutes");
 const requestLogger = require("./middleware/requestLogger");
+const { createRateLimiter } = require("./middleware/rateLimiter");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const env = require("./config/env");
 
@@ -30,6 +32,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(requestLogger);
+app.use(createRateLimiter({ windowMs: 60000, max: 900 }));
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -42,6 +45,7 @@ app.use(deviceRoutes);
 app.use(commandRoutes);
 app.use(heartbeatRoutes);
 app.use(logRoutes);
+app.use(monitoringRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
