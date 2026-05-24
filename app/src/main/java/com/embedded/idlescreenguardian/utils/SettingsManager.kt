@@ -98,13 +98,10 @@ class SettingsManager(context: Context) {
         return generatedId
     }
 
-    fun getBackendBaseUrl(): String =
-        preferences.getString(KEY_BACKEND_BASE_URL, AppConstants.DEFAULT_BACKEND_BASE_URL)
-            ?.trim()
-            .orEmpty()
+    fun getBackendBaseUrl(): String = AppConstants.DEFAULT_BACKEND_BASE_URL
 
     fun setBackendBaseUrl(baseUrl: String) {
-        preferences.edit().putString(KEY_BACKEND_BASE_URL, baseUrl.trim()).apply()
+        preferences.edit().putString(KEY_BACKEND_BASE_URL, AppConstants.DEFAULT_BACKEND_BASE_URL).apply()
     }
 
     fun getApiToken(): String =

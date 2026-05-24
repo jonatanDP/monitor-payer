@@ -9,7 +9,7 @@ const router = express.Router();
 router.post(
   "/devices/:id/command",
   authMiddleware,
-  requireFields(["action"]),
+  requireFields(["type"]),
   commandController.createCommand
 );
 router.get("/devices/:id/commands", deviceAuth, commandController.getDeviceCommands);

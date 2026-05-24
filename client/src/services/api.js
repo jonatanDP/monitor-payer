@@ -1,21 +1,33 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || "https://monitor-payer-backend.onrender.com";
+const API_BASE_URL = "https://monitor-payer-backend.onrender.com";
 
 async function request(path, options = {}) {
+  const method = options.method || "GET";
+  console.debug("[api] request start", method, path);
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
-    },
-    ...options
+    }
   });
 
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    throw new Error(data?.message || "Request failed");
+    const error = new Error(data?.message || "Request failed");
+    error.status = response.status;
+    error.data = data;
+    if (response.status === 401) {
+      console.warn("[api] auth fail", method, path, data?.message || response.statusText);
+    } else {
+      console.error("[api] request fail", method, path, response.status, data);
+    }
+    throw error;
   }
 
+  console.debug("[api] request ok", method, path, response.status);
   return data;
 }
 
@@ -34,12 +46,37 @@ export function fetchDevices(token) {
   });
 }
 
-export function sendCommand(token, deviceId, payload) {
+export function fetchStats(token) {
+  return request("/stats", {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export function fetchTechnicalLogs(token) {
+  return request("/technical-logs?limit=80", {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export function fetchDeviceTimeline(token, deviceId) {
+  return request(`/devices/${deviceId}/timeline`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export function sendCommand(token, deviceId, type) {
+  console.debug("[api] command sent", deviceId, type);
   return request(`/devices/${deviceId}/command`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ type })
   });
 }

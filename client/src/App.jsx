@@ -19,5 +19,5 @@ export default function App() {
     return <LoginPage onLogin={setToken} />;
   }
 
-  return <DashboardPage token={token} onLogout={() => setToken("")} />;
+  return <DashboardPage token={token} onLogout={() => setToken("")} onAuthFailure={() => setToken("")} />;
 }

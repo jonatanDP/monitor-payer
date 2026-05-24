@@ -1,6 +1,7 @@
 package com.embedded.idlescreenguardian.network
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.embedded.idlescreenguardian.common.AppConstants
 import com.embedded.idlescreenguardian.common.IdleMode
@@ -81,8 +82,10 @@ class NetworkClient(
             put("id", deviceId)
             put("name", buildDefaultDeviceName(deviceId))
             put("status", "online")
-            put("ip", "local")
-            put("mode", "idle")
+            put("mode", "SCREEN_OFF")
+            put("android_version", Build.VERSION.RELEASE)
+            put("manufacturer", Build.MANUFACTURER)
+            put("model", Build.MODEL)
         }
 
         val created = postJson("devices", payload, successCodes = setOf(

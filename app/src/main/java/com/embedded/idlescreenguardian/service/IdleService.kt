@@ -8,17 +8,24 @@ import android.app.PendingIntent
 import android.app.Service
 import android.app.ActivityManager
 import android.app.ForegroundServiceStartNotAllowedException
+import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.StatFs
+import android.os.SystemClock
 import android.util.Log
 import com.embedded.idlescreenguardian.R
+import com.embedded.idlescreenguardian.admin.KioskDeviceAdminReceiver
 import com.embedded.idlescreenguardian.common.AppConstants
 import com.embedded.idlescreenguardian.common.IdleMode
 import com.embedded.idlescreenguardian.network.CommandFetchResult
@@ -35,6 +42,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 
 class IdleService : Service() {
 
@@ -515,18 +523,56 @@ class IdleService : Service() {
     private fun buildStatusPayload(lastEvent: String): JSONObject {
         val status = JSONObject()
         val now = System.currentTimeMillis()
+        val memoryInfo = ActivityManager.MemoryInfo()
+        getSystemService(ActivityManager::class.java)?.getMemoryInfo(memoryInfo)
+        val statFs = StatFs(filesDir.absolutePath)
+        val batteryManager = getSystemService(BatteryManager::class.java)
+        val batteryLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        val uptimeMs = SystemClock.elapsedRealtime()
+        val ramTotalMb = (memoryInfo.totalMem / 1024L / 1024L).toInt()
+        val ramFreeMb = (memoryInfo.availMem / 1024L / 1024L).toInt()
+        val ramUsedMb = (ramTotalMb - ramFreeMb).coerceAtLeast(0)
+        val storageTotalMb = (statFs.totalBytes / 1024L / 1024L).toInt()
+        val storageFreeMb = (statFs.availableBytes / 1024L / 1024L).toInt()
+        val lockTaskActive = isInLockTaskMode()
+        val serviceRunning = settingsManager.isServiceRunning()
+        val monitoringEnabled = settingsManager.isMonitoringEnabled()
+        val deviceOwner = isDeviceOwner()
+        val signature = listOf(
+            settingsManager.getLastKnownStatus(),
+            settingsManager.getIdleMode().name,
+            monitoringEnabled,
+            serviceRunning,
+            lockTaskActive,
+            ramUsedMb / 32,
+            batteryLevel
+        ).joinToString("|")
+
         settingsManager.setLastSeenTimestamp(now)
         status.put("device_id", settingsManager.getOrCreateDeviceId())
-        status.put("status", settingsManager.getLastKnownStatus())
+        status.put("status", "online")
         status.put("last_seen", now)
         status.put("last_event", lastEvent)
         status.put("mode", settingsManager.getIdleMode().name)
         status.put("timeout_minutes", settingsManager.getIdleTimeoutMinutes())
-        status.put("monitoring_enabled", settingsManager.isMonitoringEnabled())
-        status.put("service_running", settingsManager.isServiceRunning())
-        status.put("device_owner", isDeviceOwner())
+        status.put("monitoring_enabled", monitoringEnabled)
+        status.put("service_running", serviceRunning)
+        status.put("device_owner", deviceOwner)
         status.put("lock_task_permitted", screenController.isLockTaskPermitted())
-        status.put("lock_task_active", isInLockTaskMode())
+        status.put("lock_task_active", lockTaskActive)
+        status.put("android_version", Build.VERSION.RELEASE)
+        status.put("manufacturer", Build.MANUFACTURER)
+        status.put("model", Build.MODEL)
+        status.put("uptime_ms", uptimeMs)
+        status.put("ram_used_mb", ramUsedMb)
+        status.put("ram_total_mb", ramTotalMb)
+        status.put("storage_free_mb", storageFreeMb)
+        status.put("storage_total_mb", storageTotalMb)
+        if (batteryLevel >= 0) {
+            status.put("battery_level", batteryLevel)
+        }
+        status.put("battery_charging", isDeviceCharging())
+        status.put("heartbeat_signature", signature)
         return status
     }
 
@@ -575,12 +621,38 @@ class IdleService : Service() {
 
                 "RESTART_APP" -> restartLauncher("remote_command_restart_app")
 
+                "SCREEN_ON" -> wakeScreen("remote_command_screen_on")
+
+                "REBOOT_DEVICE" -> rebootDevice("remote_command_reboot_device")
+
+                "REFRESH_KIOSK" -> ensureKioskMode("remote_command_refresh_kiosk", reapplyPolicies = true)
+
+                "LOCK_SCREEN" -> {
+                    executeScreenLock("remote_command_lock_screen", modeOverride = IdleMode.SCREEN_OFF)
+                    true
+                }
+
+                "UNLOCK_SCREEN" -> wakeScreen("remote_command_unlock_screen")
+
                 "PING" -> {
                     sendStatusToBackend("remote_command_ping")
                     true
                 }
 
                 "UPDATE_CONFIG" -> applyRemoteConfig(command)
+
+                "SYNC" -> {
+                    sendStatusToBackend("remote_command_sync")
+                    true
+                }
+
+                "CLEAR_CACHE" -> clearLocalCache("remote_command_clear_cache")
+
+                "MAINTENANCE_MODE" -> {
+                    settingsManager.setLastKnownStatus("maintenance_mode")
+                    sendStatusToBackend("remote_command_maintenance_mode")
+                    true
+                }
 
                 else -> {
                     Log.w(AppConstants.LOG_TAG, "Comando remoto no soportado: ${command.action}")
@@ -591,6 +663,69 @@ class IdleService : Service() {
             Log.e(AppConstants.LOG_TAG, "Error ejecutando comando remoto ${command.action}", throwable)
             false
         }
+    }
+
+    private fun wakeScreen(reason: String): Boolean {
+        val powerManager = getSystemService(PowerManager::class.java) ?: return false
+        return try {
+            @Suppress("DEPRECATION")
+            val wakeLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "${AppConstants.LOG_TAG}:RemoteWake"
+            )
+            wakeLock.acquire(3000L)
+            wakeLock.release()
+            restartLauncher(reason)
+        } catch (throwable: Throwable) {
+            Log.e(AppConstants.LOG_TAG, "No fue posible encender pantalla. reason=$reason", throwable)
+            false
+        }
+    }
+
+    private fun rebootDevice(reason: String): Boolean {
+        if (!isDeviceOwner()) {
+            Log.w(AppConstants.LOG_TAG, "Reinicio omitido: Device Owner no activo. reason=$reason")
+            return false
+        }
+
+        val manager = getSystemService(DevicePolicyManager::class.java) ?: return false
+        return try {
+            manager.reboot(ComponentName(this, KioskDeviceAdminReceiver::class.java))
+            true
+        } catch (throwable: Throwable) {
+            Log.e(AppConstants.LOG_TAG, "No fue posible reiniciar dispositivo. reason=$reason", throwable)
+            false
+        }
+    }
+
+    private fun clearLocalCache(reason: String): Boolean {
+        return try {
+            deleteChildren(cacheDir)
+            externalCacheDir?.let(::deleteChildren)
+            Log.i(AppConstants.LOG_TAG, "Cache local limpiada. reason=$reason")
+            true
+        } catch (throwable: Throwable) {
+            Log.e(AppConstants.LOG_TAG, "No fue posible limpiar cache local. reason=$reason", throwable)
+            false
+        }
+    }
+
+    private fun deleteChildren(directory: File) {
+        directory.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                deleteChildren(file)
+            }
+            file.delete()
+        }
+    }
+
+    private fun isDeviceCharging(): Boolean {
+        val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL
     }
 
     private fun applyRemoteConfig(command: RemoteCommand): Boolean {

@@ -3,18 +3,23 @@ const logService = require("../services/logService");
 
 async function createCommand(req, res, next) {
   try {
-    const { action, ...payload } = req.body;
-    if (!action) {
-      return res.status(400).json({ message: "action is required" });
+    const { type, ...payload } = req.body;
+    if (!type) {
+      return res.status(400).json({ message: "type is required" });
     }
 
-    const command = await commandService.queueCommand(req.params.id, action, payload);
+    console.log(`[commands] received device=${req.params.id} type=${type}`);
+    const command = await commandService.queueCommand(req.params.id, type, payload);
     await logService.createLog({
       device_id: req.params.id,
-      event: action === "SCREEN_OFF" ? "screen off" : "command queued",
-      details: { action, command_id: command.id }
+      event: type === "SCREEN_OFF" ? "screen off" : "command queued",
+      details: { type, command_id: command.id }
     });
-    return res.status(201).json(command);
+    return res.status(201).json({
+      ...command,
+      type: command.action,
+      pending: !command.executed
+    });
   } catch (error) {
     return next(error);
   }
@@ -23,9 +28,13 @@ async function createCommand(req, res, next) {
 async function getDeviceCommands(req, res, next) {
   try {
     const commands = await commandService.getDeviceCommands(req.params.id);
+    if (commands.length > 0) {
+      console.log(`[commands] delivered device=${req.params.id} count=${commands.length}`);
+    }
     return res.json(
       commands.map((command) => ({
         id: command.id,
+        type: command.action,
         action: command.action,
         ...command.payload
       }))
@@ -46,8 +55,9 @@ async function executeCommand(req, res, next) {
     await logService.createLog({
       device_id: command.device_id,
       event: "command executed",
-      details: { action: command.action, command_id: command.id }
+      details: { type: command.action, command_id: command.id }
     });
+    console.log(`[commands] executed id=${command.id} device=${command.device_id} type=${command.action}`);
     return res.json(command);
   } catch (error) {
     return next(error);

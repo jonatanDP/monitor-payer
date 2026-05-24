@@ -25,8 +25,9 @@ export default function LoginPage({ onLogin }) {
   return (
     <main className="auth-shell">
       <form className="auth-card" onSubmit={handleSubmit}>
+        <span className="eyebrow">Acceso tecnico</span>
         <h1>Secure Screen Manager</h1>
-        <p>Control remoto basico para pantallas Android kiosk.</p>
+        <p>Consola profesional de monitoreo y soporte remoto para pantallas Android kiosk.</p>
 
         <label>
           Usuario
