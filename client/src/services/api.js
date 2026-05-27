@@ -80,3 +80,46 @@ export function sendCommand(token, deviceId, type) {
     body: JSON.stringify({ type })
   });
 }
+
+export function updateDevice(token, deviceId, payload) {
+  console.debug("[api] device update", deviceId, payload);
+  return request(`/devices/${deviceId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function sendBulkCommand(token, type, deviceIds = []) {
+  console.debug("[api] bulk command sent", type, deviceIds.length || "all");
+  return request("/devices/bulk-command", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ type, deviceIds })
+  });
+}
+
+export function saveDeviceSchedule(token, deviceId, payload) {
+  console.debug("[api] schedule update", deviceId, payload);
+  return request(`/devices/${deviceId}/schedule`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function requestDeviceScreenshot(token, deviceId) {
+  console.debug("[api] screenshot request", deviceId);
+  return request(`/devices/${deviceId}/screenshot`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}

@@ -6,7 +6,11 @@ import {
   fetchDevices,
   fetchStats,
   fetchTechnicalLogs,
-  sendCommand
+  requestDeviceScreenshot,
+  saveDeviceSchedule,
+  sendBulkCommand,
+  sendCommand,
+  updateDevice
 } from "../services/api";
 
 const EMPTY_STATS = {
@@ -85,6 +89,7 @@ export default function DashboardPage({ token, onLogout, onAuthFailure }) {
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [busyGlobal, setBusyGlobal] = useState(false);
 
   async function loadDevices() {
     try {
@@ -170,6 +175,95 @@ export default function DashboardPage({ token, onLogout, onAuthFailure }) {
     }
   }
 
+  async function handleSaveDevice(device, payload) {
+    setBusyDeviceId(device.id);
+    setError("");
+
+    try {
+      const updated = await updateDevice(token, device.id, payload);
+      await loadDevices();
+      await handleSelectDevice(updated);
+    } catch (requestError) {
+      if (isAuthError(requestError)) {
+        console.warn("[dashboard] auth fail actualizando dispositivo");
+        onAuthFailure?.();
+        return;
+      }
+      setError(requestError.message);
+    } finally {
+      setBusyDeviceId("");
+    }
+  }
+
+  async function handleSaveSchedule(device, payload) {
+    setBusyDeviceId(device.id);
+    setError("");
+
+    try {
+      await saveDeviceSchedule(token, device.id, {
+        power_on: payload.scheduled_power_on,
+        power_off: payload.scheduled_power_off,
+        auto_sync_interval_minutes: payload.auto_sync_interval_minutes
+      });
+      await loadDevices();
+      await handleSelectDevice(device);
+    } catch (requestError) {
+      if (isAuthError(requestError)) {
+        console.warn("[dashboard] auth fail guardando horario");
+        onAuthFailure?.();
+        return;
+      }
+      setError(requestError.message);
+    } finally {
+      setBusyDeviceId("");
+    }
+  }
+
+  async function handleScreenshot(device) {
+    setBusyDeviceId(device.id);
+    setError("");
+
+    try {
+      await requestDeviceScreenshot(token, device.id);
+      await handleSelectDevice(device);
+    } catch (requestError) {
+      if (isAuthError(requestError)) {
+        console.warn("[dashboard] auth fail solicitando screenshot");
+        onAuthFailure?.();
+        return;
+      }
+      setError(requestError.message);
+    } finally {
+      setBusyDeviceId("");
+    }
+  }
+
+  async function handleBulkAction(action) {
+    setBusyGlobal(true);
+    setError("");
+
+    try {
+      await sendBulkCommand(token, action);
+      await loadDevices();
+    } catch (requestError) {
+      if (isAuthError(requestError)) {
+        console.warn("[dashboard] auth fail enviando accion masiva");
+        onAuthFailure?.();
+        return;
+      }
+      setError(requestError.message);
+    } finally {
+      setBusyGlobal(false);
+    }
+  }
+
+  function selectDeviceById(deviceId) {
+    const device = devices.find((item) => item.id === deviceId);
+    if (device) {
+      handleSelectDevice(device);
+    }
+  }
+
   const cards = [
     { label: "Total dispositivos", value: stats.total_devices, tone: "blue" },
     { label: "Online", value: stats.online_devices, tone: "green" },
@@ -211,13 +305,25 @@ export default function DashboardPage({ token, onLogout, onAuthFailure }) {
 
       {error ? <div className="error-box">{error}</div> : null}
 
+      <section className="bulk-toolbar">
+        <div>
+          <span className="eyebrow">Acciones masivas</span>
+          <strong>Operacion sobre todos los dispositivos visibles</strong>
+        </div>
+        <div className="bulk-actions">
+          <button disabled={busyGlobal} className="action-button danger" onClick={() => handleBulkAction("SCREEN_OFF")}>Apagar todas</button>
+          <button disabled={busyGlobal} className="action-button success" onClick={() => handleBulkAction("SCREEN_ON")}>Encender todas</button>
+          <button disabled={busyGlobal} className="action-button warning" onClick={() => handleBulkAction("RESTART_APP")}>Reiniciar todas</button>
+          <button disabled={busyGlobal} className="action-button neutral" onClick={() => handleBulkAction("SYNC")}>Sincronizar todas</button>
+        </div>
+      </section>
+
       {loading ? (
         <div className="loading-box">Cargando consola de monitoreo...</div>
       ) : (
         <DeviceTable
           devices={devices}
-          busyDeviceId={busyDeviceId}
-          onAction={handleAction}
+          selectedDeviceId={selectedDevice?.id}
           onSelectDevice={handleSelectDevice}
         />
       )}
@@ -229,18 +335,18 @@ export default function DashboardPage({ token, onLogout, onAuthFailure }) {
         </div>
         <div className="alert-list">
           {devices.filter((device) => device.frozen || device.status === "offline" || device.heartbeatAgeSeconds > 20).slice(0, 6).map((device) => (
-            <div className="alert-item" key={`alert-${device.id}`}>
+            <button className="alert-item" type="button" onClick={() => handleSelectDevice(device)} key={`alert-${device.id}`}>
               <strong>{device.name || device.id}</strong>
               <span>
                 {device.frozen ? "Pantalla congelada detectada" : device.status === "offline" ? "Dispositivo offline" : "Heartbeat tardio"}
               </span>
-            </div>
+            </button>
           ))}
           {logs.slice(0, 6).map((log) => (
-            <div className="alert-item" key={`log-${log.id}`}>
+            <button className="alert-item" type="button" onClick={() => selectDeviceById(log.device_id)} key={`log-${log.id}`}>
               <strong>{log.event}</strong>
               <span>{log.device_id || "Sistema"} - {new Date(log.created_at).toLocaleTimeString("es-CO")}</span>
-            </div>
+            </button>
           ))}
         </div>
       </section>
@@ -249,6 +355,11 @@ export default function DashboardPage({ token, onLogout, onAuthFailure }) {
         device={selectedDevice}
         timeline={timeline}
         loading={timelineLoading}
+        busy={busyDeviceId === selectedDevice?.id}
+        onAction={handleAction}
+        onSave={handleSaveDevice}
+        onSaveSchedule={handleSaveSchedule}
+        onRequestScreenshot={handleScreenshot}
         onClose={() => setSelectedDevice(null)}
       />
     </main>

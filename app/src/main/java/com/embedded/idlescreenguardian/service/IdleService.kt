@@ -563,6 +563,7 @@ class IdleService : Service() {
         status.put("android_version", Build.VERSION.RELEASE)
         status.put("manufacturer", Build.MANUFACTURER)
         status.put("model", Build.MODEL)
+        status.put("brand", Build.BRAND)
         status.put("uptime_ms", uptimeMs)
         status.put("ram_used_mb", ramUsedMb)
         status.put("ram_total_mb", ramTotalMb)
@@ -639,7 +640,8 @@ class IdleService : Service() {
                     true
                 }
 
-                "UPDATE_CONFIG" -> applyRemoteConfig(command)
+                "UPDATE_CONFIG",
+                "APPLY_DEVICE_CONFIG" -> applyRemoteConfig(command)
 
                 "SYNC" -> {
                     sendStatusToBackend("remote_command_sync")
@@ -653,6 +655,8 @@ class IdleService : Service() {
                     sendStatusToBackend("remote_command_maintenance_mode")
                     true
                 }
+
+                "CAPTURE_SCREEN" -> reportScreenshotUnavailable()
 
                 else -> {
                     Log.w(AppConstants.LOG_TAG, "Comando remoto no soportado: ${command.action}")
@@ -710,6 +714,23 @@ class IdleService : Service() {
             Log.e(AppConstants.LOG_TAG, "No fue posible limpiar cache local. reason=$reason", throwable)
             false
         }
+    }
+
+    private fun reportScreenshotUnavailable(): Boolean {
+        val deviceId = settingsManager.getOrCreateDeviceId()
+        networkClient.sendLog(
+            deviceId,
+            "screenshot unavailable",
+            JSONObject().apply {
+                put("reason", "Android requires MediaProjection consent or vendor Device Owner screenshot API")
+                put("android_version", Build.VERSION.RELEASE)
+                put("manufacturer", Build.MANUFACTURER)
+                put("model", Build.MODEL)
+                put("brand", Build.BRAND)
+            }
+        )
+        sendStatusToBackend("remote_command_screenshot_unavailable")
+        return true
     }
 
     private fun deleteChildren(directory: File) {

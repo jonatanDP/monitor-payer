@@ -86,6 +86,7 @@ class NetworkClient(
             put("android_version", Build.VERSION.RELEASE)
             put("manufacturer", Build.MANUFACTURER)
             put("model", Build.MODEL)
+            put("brand", Build.BRAND)
         }
 
         val created = postJson("devices", payload, successCodes = setOf(
@@ -287,7 +288,7 @@ class NetworkClient(
                     val payload = JSONObject(responseBody)
                     when {
                         payload.has("commands") -> parseCommandsArray(payload.optJSONArray("commands"))
-                        payload.has("action") -> listOf(parseCommand(payload))
+                        payload.has("action") || payload.has("type") -> listOf(parseCommand(payload))
                         else -> emptyList()
                     }
                 }
@@ -324,7 +325,7 @@ class NetworkClient(
 
         return RemoteCommand(
             id = payload.optString("id").takeIf { it.isNotBlank() },
-            action = payload.optString("action"),
+            action = payload.optString("action").ifBlank { payload.optString("type") },
             timeoutMinutes = payload.optInt("timeout_minutes").takeIf { it > 0 },
             idleMode = mode,
             monitoringEnabled = payload.opt("monitoring_enabled") as? Boolean

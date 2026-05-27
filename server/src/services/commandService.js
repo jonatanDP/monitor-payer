@@ -13,7 +13,9 @@ const ALLOWED_ACTIONS = [
   "UPDATE_CONFIG",
   "SYNC",
   "CLEAR_CACHE",
-  "MAINTENANCE_MODE"
+  "MAINTENANCE_MODE",
+  "CAPTURE_SCREEN",
+  "APPLY_DEVICE_CONFIG"
 ];
 
 async function queueCommand(deviceId, action, payload) {

@@ -45,6 +45,18 @@ async function ensureSchema(pool) {
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS android_version TEXT");
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS manufacturer TEXT");
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS model TEXT");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS brand TEXT");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS device_group TEXT DEFAULT 'PRODUCTION'");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS environment TEXT DEFAULT 'PRODUCTION'");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS agent_hidden BOOLEAN DEFAULT false");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN DEFAULT false");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS scheduled_power_on TEXT");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS scheduled_power_off TEXT");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_sync_interval_minutes INTEGER DEFAULT 10");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS config_updated_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_screenshot_url TEXT");
+  await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_screenshot_at TIMESTAMPTZ");
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS uptime_ms BIGINT");
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS temperature_c NUMERIC");
   await pool.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS ram_used_mb INTEGER");
@@ -127,6 +139,30 @@ async function ensureSchema(pool) {
       message TEXT,
       resolved BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS device_schedules (
+      id SERIAL PRIMARY KEY,
+      device_id TEXT,
+      power_on TEXT,
+      power_off TEXT,
+      timezone TEXT DEFAULT 'America/Bogota',
+      enabled BOOLEAN DEFAULT true,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS screenshots (
+      id SERIAL PRIMARY KEY,
+      device_id TEXT,
+      status TEXT DEFAULT 'requested',
+      image_url TEXT,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      requested_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      captured_at TIMESTAMPTZ
     )
   `);
 

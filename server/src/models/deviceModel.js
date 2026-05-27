@@ -60,11 +60,27 @@ async function findById(id) {
   return result.rows[0] || null;
 }
 
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) {
+    return tags.map((tag) => String(tag).trim()).filter(Boolean);
+  }
+  if (typeof tags === "string") {
+    return tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 async function createDevice(device) {
   const id = device.id || randomUUID();
   const result = await pool.query(
-    `INSERT INTO devices (id, name, location, status, last_seen, ip, idle_time, mode)
-     VALUES ($1, $2, $3, COALESCE($4, 'online'), COALESCE($5, NOW()), $6, $7, $8)
+    `INSERT INTO devices (
+       id, name, location, status, last_seen, ip, idle_time, mode,
+       android_version, manufacturer, model, brand, device_group, tags, environment
+     )
+     VALUES (
+       $1, $2, $3, COALESCE($4, 'online'), COALESCE($5, NOW()), $6, $7, $8,
+       $9, $10, $11, $12, $13, $14::jsonb, $15
+     )
      ON CONFLICT (id)
      DO UPDATE SET
        name = COALESCE(EXCLUDED.name, devices.name),
@@ -73,8 +89,15 @@ async function createDevice(device) {
        last_seen = NOW(),
        ip = COALESCE(NULLIF(EXCLUDED.ip, ''), devices.ip),
        idle_time = COALESCE(EXCLUDED.idle_time, devices.idle_time),
-       mode = COALESCE(EXCLUDED.mode, devices.mode)
-     RETURNING id, name, location, status, last_seen, ip, idle_time, mode, created_at`,
+       mode = COALESCE(EXCLUDED.mode, devices.mode),
+       android_version = COALESCE(EXCLUDED.android_version, devices.android_version),
+       manufacturer = COALESCE(EXCLUDED.manufacturer, devices.manufacturer),
+       model = COALESCE(EXCLUDED.model, devices.model),
+       brand = COALESCE(EXCLUDED.brand, devices.brand),
+       device_group = COALESCE(EXCLUDED.device_group, devices.device_group),
+       tags = CASE WHEN EXCLUDED.tags = '[]'::jsonb THEN devices.tags ELSE EXCLUDED.tags END,
+       environment = COALESCE(EXCLUDED.environment, devices.environment)
+     RETURNING *`,
     [
       id,
       device.name,
@@ -83,7 +106,14 @@ async function createDevice(device) {
       device.lastSeen || null,
       device.ip || "",
       device.idleTime || 30,
-      device.mode || "SCREEN_OFF"
+      device.mode || "SCREEN_OFF",
+      device.android_version || null,
+      device.manufacturer || null,
+      device.model || null,
+      device.brand || null,
+      device.device_group || device.group || "PRODUCTION",
+      JSON.stringify(normalizeTags(device.tags)),
+      device.environment || "PRODUCTION"
     ]
   );
   return result.rows[0];
@@ -103,9 +133,18 @@ async function updateDevice(id, updates) {
          last_seen = $5,
          ip = $6,
          idle_time = $7,
-         mode = $8
+         mode = $8,
+         device_group = $9,
+         tags = $10::jsonb,
+         environment = $11,
+         agent_hidden = $12,
+         maintenance_mode = $13,
+         scheduled_power_on = $14,
+         scheduled_power_off = $15,
+         auto_sync_interval_minutes = $16,
+         config_updated_at = NOW()
      WHERE id = $1
-     RETURNING id, name, location, status, last_seen, ip, idle_time, mode`,
+     RETURNING *`,
     [
       id,
       updates.name ?? current.name,
@@ -114,17 +153,88 @@ async function updateDevice(id, updates) {
       updates.lastSeen ?? current.last_seen,
       updates.ip ?? current.ip,
       updates.idleTime ?? current.idle_time,
-      updates.mode ?? current.mode
+      updates.mode ?? current.mode,
+      updates.device_group ?? updates.group ?? current.device_group,
+      JSON.stringify(updates.tags === undefined ? current.tags || [] : normalizeTags(updates.tags)),
+      updates.environment ?? current.environment,
+      updates.agent_hidden ?? current.agent_hidden,
+      updates.maintenance_mode ?? current.maintenance_mode,
+      updates.scheduled_power_on ?? current.scheduled_power_on,
+      updates.scheduled_power_off ?? current.scheduled_power_off,
+      updates.auto_sync_interval_minutes ?? current.auto_sync_interval_minutes
     ]
   );
   return result.rows[0];
+}
+
+async function saveSchedule(deviceId, schedule) {
+  const current = await findById(deviceId);
+  if (!current) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `INSERT INTO device_schedules (device_id, power_on, power_off, timezone, enabled, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     RETURNING *`,
+    [
+      deviceId,
+      schedule.power_on || null,
+      schedule.power_off || null,
+      schedule.timezone || "America/Bogota",
+      schedule.enabled !== false
+    ]
+  );
+
+  await pool.query(
+    `UPDATE devices
+     SET scheduled_power_on = $2,
+         scheduled_power_off = $3,
+         auto_sync_interval_minutes = $4,
+         config_updated_at = NOW()
+     WHERE id = $1`,
+    [
+      deviceId,
+      schedule.power_on || null,
+      schedule.power_off || null,
+      schedule.auto_sync_interval_minutes || current.auto_sync_interval_minutes || 10
+    ]
+  );
+
+  return result.rows[0];
+}
+
+async function requestScreenshot(deviceId) {
+  const current = await findById(deviceId);
+  if (!current) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `INSERT INTO screenshots (device_id, status)
+     VALUES ($1, 'requested')
+     RETURNING *`,
+    [deviceId]
+  );
+  return result.rows[0];
+}
+
+async function findIds(deviceIds) {
+  const values = Array.isArray(deviceIds) ? deviceIds.filter(Boolean) : [];
+  if (values.length === 0) {
+    const result = await pool.query("SELECT id FROM devices ORDER BY last_seen DESC NULLS LAST");
+    return result.rows.map((row) => row.id);
+  }
+
+  const result = await pool.query("SELECT id FROM devices WHERE id = ANY($1::text[])", [values]);
+  return result.rows.map((row) => row.id);
 }
 
 async function updateStatus(deviceId, payload) {
   const result = await pool.query(
     `INSERT INTO devices (
        id, name, location, status, last_seen, ip, idle_time, mode,
-       android_version, manufacturer, model, uptime_ms, temperature_c,
+       android_version, manufacturer, model, brand, uptime_ms, temperature_c,
        ram_used_mb, ram_total_mb, storage_free_mb, storage_total_mb,
        battery_level, battery_charging, service_running, monitoring_enabled,
        device_owner, lock_task_active, last_event, latency_ms,
@@ -132,11 +242,11 @@ async function updateStatus(deviceId, payload) {
      )
      VALUES (
        $1, $2, $3, $4, NOW(), $5, $6, $7,
-       $8, $9, $10, $11, $12,
-       $13, $14, $15, $16,
-       $17, $18, $19, $20,
-       $21, $22, $23, $24,
-       $25, CASE WHEN $26::bigint IS NULL THEN NULL ELSE NOW() - ($26::bigint * INTERVAL '1 millisecond') END
+       $8, $9, $10, $11, $12, $13,
+       $14, $15, $16, $17,
+       $18, $19, $20, $21,
+       $22, $23, $24, $25,
+       $26, CASE WHEN $27::bigint IS NULL THEN NULL ELSE NOW() - ($27::bigint * INTERVAL '1 millisecond') END
      )
      ON CONFLICT (id)
      DO UPDATE SET
@@ -150,6 +260,7 @@ async function updateStatus(deviceId, payload) {
        android_version = COALESCE(EXCLUDED.android_version, devices.android_version),
        manufacturer = COALESCE(EXCLUDED.manufacturer, devices.manufacturer),
        model = COALESCE(EXCLUDED.model, devices.model),
+       brand = COALESCE(EXCLUDED.brand, devices.brand),
        uptime_ms = COALESCE(EXCLUDED.uptime_ms, devices.uptime_ms),
        temperature_c = COALESCE(EXCLUDED.temperature_c, devices.temperature_c),
        ram_used_mb = COALESCE(EXCLUDED.ram_used_mb, devices.ram_used_mb),
@@ -178,6 +289,7 @@ async function updateStatus(deviceId, payload) {
       payload.android_version || null,
       payload.manufacturer || null,
       payload.model || null,
+      payload.brand || null,
       payload.uptime_ms || null,
       payload.temperature_c || null,
       payload.ram_used_mb || null,
@@ -243,8 +355,11 @@ async function upsertHeartbeat(deviceId, payload) {
 module.exports = {
   findAll,
   findById,
+  findIds,
   createDevice,
   updateDevice,
+  saveSchedule,
+  requestScreenshot,
   updateStatus,
   upsertHeartbeat,
   markOfflineDevices
